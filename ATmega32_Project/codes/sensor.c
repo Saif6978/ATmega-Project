@@ -5,6 +5,7 @@
 
 
 #define FLAME_THRESHOLD 500
+#define DISTANCE_THRESHOLD 15
 
 
 
@@ -58,19 +59,16 @@ void set_left_speed(uint8_t speed)
 
 
 
+
 // ================= ADC =================
 
 
 void adc_init()
 {
-    // AVCC reference
     ADMUX |= (1 << REFS0);
 
-
-    // ADC enable
-    // Prescaler 64
-
     ADCSRA |= (1 << ADEN);
+
     ADCSRA |= (1 << ADPS2) | (1 << ADPS1);
 }
 
@@ -79,14 +77,10 @@ void adc_init()
 uint16_t read_adc()
 {
 
-    // Select ADC0
     ADMUX &= 0xF0;
 
 
-    // Start conversion
-
     ADCSRA |= (1 << ADSC);
-
 
 
     while(ADCSRA & (1 << ADSC));
@@ -95,6 +89,109 @@ uint16_t read_adc()
     return ADC;
 
 }
+
+
+
+// ================= FLAME SENSOR =================
+
+
+uint8_t flame_detected()
+{
+    uint16_t value = read_adc();
+
+
+    if(value < FLAME_THRESHOLD)
+        return 1;
+
+
+    return 0;
+}
+
+
+
+// ================= ULTRASONIC SENSOR =================
+
+
+// TRIG = PC0
+// ECHO = PC1
+
+void sonar_init()
+{
+    DDRC |= (1 << PC0);      // TRIG output
+
+    DDRC &= ~(1 << PC1);     // ECHO input
+}
+
+
+
+void trigger_sonar()
+{
+
+    PORTC &= ~(1 << PC0);
+
+    _delay_us(2);
+
+
+    PORTC |= (1 << PC0);
+
+    _delay_us(10);
+
+
+    PORTC &= ~(1 << PC0);
+
+}
+
+
+
+uint16_t get_distance()
+{
+
+    uint16_t count = 0;
+
+
+    trigger_sonar();
+
+
+
+    while(!(PINC & (1 << PC1)));
+
+
+
+    while(PINC & (1 << PC1))
+    {
+
+        count++;
+
+        _delay_us(1);
+
+
+        if(count > 30000)
+            break;
+
+    }
+
+
+    return count / 58;
+
+}
+
+
+
+uint8_t object_detected()
+{
+
+    uint16_t distance = get_distance();
+
+
+    if(distance <= DISTANCE_THRESHOLD)
+        return 1;
+
+
+    return 0;
+
+}
+
+
 
 
 
@@ -121,6 +218,8 @@ void motor_init()
     DDRD |= (1 << PD3);
 
 }
+
+
 
 
 
@@ -152,11 +251,18 @@ void forward()
 
 
 
+
+
 void stop_motor()
 {
+
     OCR0 = 0;
+
     OCR1A = 0;
+
 }
+
+
 
 
 
@@ -174,40 +280,36 @@ int main()
 
     adc_init();
 
+    sonar_init();
+
 
 
     while(1)
     {
 
 
-        uint16_t flame_value = read_adc();
-
-
-
-        if(flame_value < FLAME_THRESHOLD)
+        if(flame_detected() || object_detected())
         {
 
-            // Flame detected
+            // stop immediately
 
             stop_motor();
 
 
 
-            // wait until flame is gone
+            // wait until both conditions clear
 
-            while(read_adc() < FLAME_THRESHOLD)
+            while(flame_detected() || object_detected())
             {
                 _delay_ms(50);
             }
 
-        }
 
+        }
 
 
         else
         {
-
-            // Normal operation
 
             forward();
 
@@ -217,7 +319,6 @@ int main()
             set_left_speed(180);
 
         }
-
 
 
     }
